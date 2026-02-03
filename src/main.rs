@@ -46,6 +46,11 @@ const WIKIDOT_SPACE_NAME: &str = "wikidot";
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
+    // Fix for "Could not automatically determine the process-level CryptoProvider"
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     // Load config from file
     let config_path = std::env::args().nth(1).unwrap_or_else(|| "config.toml".to_string());
     let config_str = fs::read_to_string(&config_path)?;
