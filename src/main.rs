@@ -20,6 +20,7 @@ use tracing::{debug, error, info, warn};
 #[derive(Deserialize, Clone)]
 struct Config {
     domain: String,
+    port: String,
     listen_addr: String,
     upstream_proxy: String,
     ssl_cert: String,
@@ -30,6 +31,7 @@ struct Config {
 #[derive(Clone)]
 struct AppState {
     client: Client,
+    port: String,
     proxy_to: HashMap<String, String>,
     substitutions: Vec<Substitution>,
     domain: String,
@@ -41,7 +43,7 @@ struct Substitution {
     to: String,
 }
 
-const WIKIDOT_SPACE_NAME: &str = "wikidot";
+const WIKIDOT_SPACE_NAME: &str = "wikidot-proxy";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -113,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
         let from_re = Regex::new(&regex::escape(&from_str))?;
         substitutions.push(Substitution {
             from: from_re,
-            to: format!("https://{}{}", proxy, config.domain),
+            to: format!("https://{}{}{}", proxy, config.domain, config.port),
         });
 
         let target_escaped = regex::escape(target);
@@ -121,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
         let complex_re = Regex::new(&complex_pattern)?;
         substitutions.push(Substitution {
             from: complex_re,
-            to: format!("${{1}}{}{}", proxy, config.domain),
+            to: format!("${{1}}{}{}{}", proxy, config.domain, config.port),
         });
     }
     info!("Initialized {} substitution rules", substitutions.len());
@@ -144,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
         proxy_to,
         substitutions,
         domain: config.domain.clone(),
+        port: config.port.clone(),
     });
 
     // 4. Setup Router
@@ -187,27 +190,26 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handler(State(state): State<Arc<AppState>>, req: Request) -> Response {
+async fn handler(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Host(host): axum::extract::Host,
+    req: Request,
+) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
 
-    let host_header = req
-        .headers()
-        .get(header::HOST)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("");
-
-    if host_header.is_empty() {
-        warn!("Request received with missing or invalid Host header");
-        return (StatusCode::BAD_REQUEST, "Missing Host header").into_response();
+    if host.is_empty() {
+        warn!("Request received with missing or invalid host");
+        return (StatusCode::BAD_REQUEST, "Missing host").into_response();
     }
 
-    let space_host: Vec<&str> = host_header.split(&state.domain).collect();
+    let host_str = host.as_str();
+    let space_host: Vec<&str> = host_str.split(&state.domain).collect();
 
     if space_host.len() != 2 {
         warn!(
             "Host header '{}' does not match domain suffix '{}'",
-            host_header, state.domain
+            host_str, state.domain
         );
         return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid Host header").into_response();
     }
@@ -232,7 +234,7 @@ async fn handler(State(state): State<Arc<AppState>>, req: Request) -> Response {
 
     debug!(
         "Proxying request: {} {} -> {}",
-        method, host_header, target_url
+        method, host_str, target_url
     );
 
     let mut headers = req.headers().clone();
@@ -336,7 +338,8 @@ async fn handler(State(state): State<Arc<AppState>>, req: Request) -> Response {
                     let mut changed = false;
                     for (proxy, target) in &state.proxy_to {
                         let original = format!("http://{}", target);
-                        let replacement = format!("https://{}{}", proxy, state.domain);
+                        let replacement =
+                            format!("https://{}{}{}", proxy, state.domain, state.port);
                         if new_loc.contains(&original) {
                             new_loc = new_loc.replace(&original, &replacement);
                             changed = true;
