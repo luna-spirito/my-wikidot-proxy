@@ -7,12 +7,12 @@ edition = "2021"
 tokio = { version = "1.36", features = ["full"] }
 axum = { version = "0.7", features = ["http2"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "charset", "socks"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "charset", "socks", "gzip", "brotli", "deflate"] }
 regex = "1.10"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 anyhow = "1.0"
 rustls = { version = "0.23", features = ["ring"] }
-tower-http = { version = "0.5", features = ["auth", "validate-request"] }
+tower-http = { version = "0.5", features = ["auth", "validate-request", "compression-full"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
