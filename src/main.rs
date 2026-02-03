@@ -138,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
             );
             e
         })?)
+        .http1_only() // Force HTTP/1.1 to preserve multiple Set-Cookie headers
         .danger_accept_invalid_certs(true)
         .build()?;
 
@@ -261,6 +262,13 @@ async fn handler(
             let status = resp.status();
             debug!("Upstream response received: {} for {}", status, target_url);
 
+            // Debug: log ALL headers from upstream
+            debug!("--- Raw upstream headers ---");
+            for (name, value) in resp.headers().iter() {
+                debug!("  {}: {:?}", name, value);
+            }
+            debug!("--- End raw headers ---");
+
             let mut resp_headers = resp.headers().clone();
 
             let content_type = resp_headers
@@ -308,11 +316,20 @@ async fn handler(
             };
 
             // Process cookies
+            // Note: reqwest's HeaderMap should handle multiple Set-Cookie headers
             let set_cookies: Vec<String> = resp_headers
                 .get_all(header::SET_COOKIE)
                 .iter()
                 .filter_map(|v| v.to_str().ok().map(|s| s.to_string()))
                 .collect();
+
+            debug!(
+                "Found {} Set-Cookie headers in response",
+                set_cookies.len()
+            );
+            for (i, c) in set_cookies.iter().enumerate() {
+                debug!("  Cookie {}: {}", i, c);
+            }
 
             if !set_cookies.is_empty() {
                 debug!("Rewriting {} cookies", set_cookies.len());
@@ -322,6 +339,7 @@ async fn handler(
                     let new_val = format!("{}; SameSite=Lax", replaced);
                     if let Ok(v) = HeaderValue::from_str(&new_val) {
                         resp_headers.append(header::SET_COOKIE, v);
+                        debug!("Appended rewritten cookie: {}", new_val);
                     } else {
                         warn!(
                             "Failed to create HeaderValue for modified cookie: {}",
